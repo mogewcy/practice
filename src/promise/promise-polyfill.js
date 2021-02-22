@@ -67,6 +67,10 @@ class Promise {
     this.onRejectedCallbacks = [];
 
     let resolve = (value) => {
+      if (value instanceof Promise) {
+        return value.then(resolve, reject);
+      }
+
       if (this.status === PENDING) {
         this.status = FULFILLED;
         this.value = value;
@@ -163,6 +167,151 @@ class Promise {
 
   catch(onRejected) {
     return this.then(undefined, onRejected);
+  }
+
+  finally(callback) {
+    return this.then(
+      (value) => {
+        return Promise.resolve(value).then(callback);
+      },
+      (reason) => {
+        return Promise.reject(reason).catch(callback);
+      }
+    );
+  }
+
+  static resolve(data) {
+    return new Promise((resolve, reject) => {
+      return resolve(data);
+    });
+  }
+
+  static reject(err) {
+    return new Promise((resolve, reject) => {
+      return reject(err);
+    });
+  }
+
+  // iterable是可遍历对象, 这里只考虑了iterable为数组的情况
+  static all(iterable) {
+    if (typeof iterable === "undefined") {
+      throw new TypeError("参数必须是iterable的");
+    }
+
+    let promises;
+
+    if (iterable instanceof Set) {
+      promises = [...iterable]; // 把set转换为array
+    } else if (iterable instanceof Array) {
+      promises = [...iterable];
+    } else if (typeof iterable === "string") {
+      promises = [...iterable];
+    }
+
+    if (!promises.length) {
+      // 如果传入的参数是一个空的可迭代对象，则返回一个已完成（already resolved）状态的 Promise。
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      let count = promises.length;
+
+      const result = [];
+
+      const checkDone = () => {
+        if (count === 0) {
+          resolve(result);
+        }
+      };
+
+      promises.forEach((p, i) => {
+        if (p && p.then === "function") {
+          p.then((x) => {
+            result[i] = x;
+          }, reject).then(() => {
+            count--;
+
+            return checkDone();
+          });
+        } else {
+          result[i] = p;
+
+          checkDone();
+        }
+      });
+    });
+  }
+
+  // 返回第一个有确定状态的，有结果的promise
+  static race(promises) {
+    return new Promise((resolve, reject) => {
+      promises.forEach((p) => {
+        if (p && typeof p.then === "function") {
+          p.then(resolve, reject);
+        } else {
+          resolve(p);
+        }
+      });
+    });
+  }
+
+  // 返回第一个成功态的promise
+  static any(promises) {
+    if (!promises.length) {
+      // 如果传入的参数是一个空的可迭代对象，则返回一个 已失败（already rejected） 状态的 Promise。
+      return Promise.reject();
+    }
+
+    return new Promise((resolve, reject) => {
+      let count = 0;
+
+      promises.forEach((p) => {
+        if (p && typeof p.then === "function") {
+          p.then(resolve).catch((err) => {
+            count++;
+
+            if (count === promises.length) {
+              // 如果都没有成功的话 则reject
+              reject(new Error("All promises were rejected"));
+            }
+          });
+        } else {
+          resolve(p);
+        }
+      });
+    });
+  }
+
+  // 如果所有的promise都有了确定的状态，则进入resolve
+  static allSettled(promises) {
+    return new Promise((resolve, reject) => {
+      let result = [];
+
+      const checkDone = () => {
+        if (result.length === promises.length) {
+          resolve(result);
+        }
+      };
+
+      promises.forEach((p, i) => {
+        if (p && typeof p.then === "function") {
+          p.then(
+            (x) => {
+              result[i] = {
+                status: FULFILLED,
+                value: x
+              };
+            },
+            (y) => {
+              result[i] = {
+                status: REJECTED,
+                reason: y
+              };
+            }
+          ).then(checkDone);
+        }
+      });
+    });
   }
 }
 
